@@ -11,7 +11,6 @@ __version__ = "0.2.0"
 class UltraLog:
     """
     Unified logger that can work in both local and remote modes.
-    Automatically switches based on ULOG_MODE environment variable.
     """
     
     def __init__(
@@ -36,7 +35,7 @@ class UltraLog:
         Initialize the unified logger.
         
         Parameters:
-            name: Logger name (default: "Logger")
+            name: Logger name (default: "UltraLogger")
             fp: File path for local logging (default: None)
             level: Logging level (default: "INFO")
             truncate_file: Truncate file on initialization (default: False)

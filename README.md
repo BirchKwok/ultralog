@@ -1,10 +1,9 @@
 # UltraLog - Unified Logging System
 
-UltraLog is a high-performance logging system that supports both local file logging and remote API logging with automatic mode switching.
+UltraLog is a high-performance logging system that supports both local file logging and remote API logging.
 
 ## Key Features
 
-- **Dual Mode Operation**: Automatically switches between local and remote logging
 - **Thread-Safe**: Supports concurrent writes from multiple threads/clients
 - **Flexible Configuration**: Extensive logging parameters via CLI or code
 - **Automatic Rotation**: File rotation with size limits and backup counts
