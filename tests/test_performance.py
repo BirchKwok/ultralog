@@ -9,7 +9,7 @@ from threading import Thread
 import psutil
 from loguru import logger
 
-from ultralog import UltraLog
+from ultralog.local import UltraLog
 
 class PerformanceTest:
     def __init__(self):

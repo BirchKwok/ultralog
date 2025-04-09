@@ -1,0 +1,136 @@
+import os
+import tempfile
+import shutil
+import unittest
+import time
+import requests
+
+from ultralog.local import UltraLog
+from ultralog.server import args
+
+class TestLocalAPI(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = tempfile.mkdtemp(prefix="ultralog_test_")
+        self.log_file = os.path.join(self.test_dir, "test.log")
+        self.ulog = UltraLog(fp=self.log_file, truncate_file=True, console_output=False)
+
+    def tearDown(self):
+        self.ulog.close()
+        shutil.rmtree(self.test_dir)
+
+    def test_local_log_levels(self):
+        """测试本地日志级别功能"""
+        test_messages = [
+            ("debug", "This is a debug message"),
+            ("info", "This is an info message"),
+            ("warning", "This is a warning message"),
+            ("error", "This is an error message"),
+            ("critical", "This is a critical message")
+        ]
+
+        for level, msg in test_messages:
+            getattr(self.ulog, level)(msg)
+
+        self.ulog.close()
+
+        # 验证日志文件内容
+        with open(self.log_file) as f:
+            content = f.read()
+            for level, msg in test_messages:
+                self.assertIn(msg, content)
+                self.assertIn(level.upper(), content)
+
+    def test_local_log_rotation(self):
+        """测试本地日志轮转功能"""
+        self.ulog.close()
+        self.ulog = UltraLog(
+            fp=self.log_file,
+            truncate_file=True,
+            console_output=True,  # 启用控制台输出以查看调试信息
+            max_file_size=200,  # 200字节
+            backup_count=2,
+            force_sync=True,
+            enable_rotation=True,
+            file_buffer_size=0  # 禁用缓冲
+        )
+
+        # 写入足够多的日志以触发轮转
+        large_msg = "x" * 50  # 每条消息50字节
+        for i in range(10):  # 总共500字节
+            self.ulog.info(f"Test message {i}: {large_msg}")
+            time.sleep(0.05)  # 确保每条消息都写入
+        
+        # 强制刷新并等待轮转完成
+        self.ulog.close()
+        time.sleep(1)  # 等待轮转完成
+        
+        # 验证日志轮转文件存在
+        print(f"Test directory: {self.test_dir}")
+        rotated_files = [f for f in os.listdir(self.test_dir) if f.startswith("test.log")]
+        print(f"Rotated files: {rotated_files}")
+        print(f"Full file list: {os.listdir(self.test_dir)}")
+        self.assertIn("test.log.1", rotated_files)
+        self.assertIn("test.log.2", rotated_files)
+
+class TestRemoteAPI(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # 使用subprocess启动服务器
+        import subprocess
+        cls.server_process = subprocess.Popen(
+            ["python", "-m", "ultralog.server", "--host", "127.0.0.1", "--port", "9999"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        # 等待服务器启动
+        time.sleep(2)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server_process.terminate()
+        cls.server_process.wait()
+
+    def test_health_check(self):
+        """测试健康检查接口"""
+        response = requests.get("http://127.0.0.1:9999/health")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "healthy"})
+
+    def test_log_without_auth(self):
+        """测试未认证的日志接口访问"""
+        response = requests.post(
+            "http://127.0.0.1:9999/log",
+            json={"message": "test", "level": "info"}
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_log_with_auth(self):
+        """测试认证后的日志接口"""
+        response = requests.post(
+            "http://127.0.0.1:9999/log",
+            json={"message": "test message", "level": "info"},
+            headers={"Authorization": f"Bearer {args.auth_token}"}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"status": "success"})
+
+    def test_log_invalid_level(self):
+        """测试无效日志级别"""
+        response = requests.post(
+            "http://127.0.0.1:9999/log",
+            json={"message": "test", "level": "invalid"},
+            headers={"Authorization": f"Bearer {args.auth_token}"}
+        )
+        self.assertEqual(response.status_code, 200)  # 服务器应接受无效级别并默认为INFO
+
+    def test_log_missing_message(self):
+        """测试缺少消息内容"""
+        response = requests.post(
+            "http://127.0.0.1:9999/log",
+            json={"level": "info"},
+            headers={"Authorization": f"Bearer {args.auth_token}"}
+        )
+        self.assertEqual(response.status_code, 200)  # 服务器应处理空消息
+
+if __name__ == "__main__":
+    unittest.main()

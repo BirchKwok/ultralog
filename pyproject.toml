@@ -4,16 +4,24 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ultralog"
-version = "0.1.0"
+version = "0.2.0"
 authors = [
     {name = "BirchKwok", email = "birchkwok@gmail.com"},
 ]
 description = "High-performance thread-safe logger with optimized file writing and rotation."
 readme = "README.md"
 requires-python = ">=3.9"
+dependencies = [
+    "fastapi>=0.95.0",
+    "uvicorn>=0.21.0; platform_system != 'Windows'",
+    "waitress>=2.1.2; platform_system == 'Windows'",
+    "asgiref>=3.7.0; platform_system == 'Windows'",
+    "python-multipart>=0.0.6",
+    "portalocker>=2.7.0",
+]
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: Apache License",
+    "License :: OSI Approved :: Apache License", 
     "Operating System :: OS Independent",
 ]
 

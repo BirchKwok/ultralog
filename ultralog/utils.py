@@ -1,5 +1,8 @@
+from datetime import datetime
 import os
 import logging
+import threading
+import time
 from typing import Any, TypeVar, Callable, Optional, Union, Type
 
 T = TypeVar('T')
@@ -60,3 +63,35 @@ def get_env_variable(
             f"Using default value {default}"
         )
         return default
+    
+
+class LogFormatter:
+    _TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+    _TIMESTAMP_CACHE_TIME = 0.5
+
+    def __init__(self, name: str = "Logger", with_time: bool = True):
+        self.name = name
+        self.with_time = with_time
+        self._last_timestamp = ""
+        self._last_timestamp_time = 0
+        self._timestamp_lock = threading.Lock()
+        
+    def _get_timestamp(self) -> str:
+        """Get cached timestamp (thread-safe)"""
+        current_time = time.time()
+        if current_time - self._last_timestamp_time > self._TIMESTAMP_CACHE_TIME:
+            with self._timestamp_lock:
+                if current_time - self._last_timestamp_time > self._TIMESTAMP_CACHE_TIME:
+                    self._last_timestamp = datetime.now().strftime(self._TIME_FORMAT)
+                    self._last_timestamp_time = current_time
+        return self._last_timestamp
+
+    def _get_level_prefix(self, level: str) -> str:
+        """Dynamic level prefix generation"""
+        return f"{self.name} - {level} - " if not self.with_time else f" - {self.name} - {level} - "
+
+    def format_message(self, msg: str, level: str) -> bytes:
+        """Format log message as bytes"""
+        prefix = self._get_level_prefix(level)
+        timestamp = self._get_timestamp() if self.with_time else ""
+        return f"{timestamp}{prefix}{msg}\n".encode('utf-8')

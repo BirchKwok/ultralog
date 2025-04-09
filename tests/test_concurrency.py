@@ -3,7 +3,7 @@ import tempfile
 import shutil
 import threading
 import multiprocessing
-from ultralog import UltraLog
+from ultralog.local import UltraLog
 
 class ConcurrencyTest:
     def __init__(self):
