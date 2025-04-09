@@ -18,12 +18,12 @@ class ConcurrencyTest:
         shutil.rmtree(self.test_dir)
         
     def test_config_race_condition(self):
-        """测试多线程同时修改logger配置"""
+        """Test concurrent configuration modification"""
         ulog = UltraLog(fp=self.log_file, truncate_file=True, console_output=False)
         threads = []
         
         def config_worker(thread_id):
-            # 每个线程尝试修改不同配置
+            # Each thread tries to modify different configurations
             if thread_id % 2 == 0:
                 ulog.level = 'DEBUG' if thread_id % 4 == 0 else 'INFO'
             else:
@@ -40,13 +40,13 @@ class ConcurrencyTest:
             
         ulog.close()
         
-        # 验证日志完整性
+        # Verify log integrity
         with open(self.log_file) as f:
             lines = f.readlines()
-            print(f"配置修改测试: 共写入{len(lines)}条日志")
+            print(f"Configuration modification test: Total {len(lines)} logs written")
             
     def test_message_race_condition(self):
-        """测试多线程日志写入竞态条件"""
+        """Test race conditions in multi-thread log writing"""
         ulog = UltraLog(fp=self.log_file, truncate_file=True, console_output=False)
         threads = []
         expected_count = self.num_threads * self.num_messages_per_thread
@@ -65,15 +65,15 @@ class ConcurrencyTest:
             
         ulog.close()
         
-        # 验证日志完整性
+        # Verify log integrity
         with open(self.log_file) as f:
             lines = f.readlines()
-            print(f"多线程写入测试: 预期{expected_count}条, 实际{len(lines)}条")
-            assert len(lines) == expected_count, "日志数量不匹配，可能存在竞态条件"
+            print(f"Multi-thread write test: Expected {expected_count}, Actual {len(lines)}")
+            assert len(lines) == expected_count, "Log count mismatch, possible race condition"
             
     @staticmethod
     def process_worker(process_id, num_messages, log_file):
-        """多进程日志写入的工作函数"""
+        """Worker function for multi-process log writing"""
         # Create logger inside process to avoid pickling issues
         logger = UltraLog(fp=log_file, console_output=False)
         try:
@@ -83,10 +83,10 @@ class ConcurrencyTest:
             logger.close()
 
     def test_multiprocess_logging(self):
-        """测试多进程日志写入"""
+        """Test multi-process log writing"""
         expected_count = self.num_processes * self.num_messages_per_process
         
-        # 清空日志文件
+        # Clear log file
         with open(self.log_file, 'w'):
             pass
             
@@ -98,22 +98,22 @@ class ConcurrencyTest:
                  for i in range(self.num_processes)]
             )
             
-        # 验证日志完整性
+        # Verify log integrity
         with open(self.log_file) as f:
             lines = f.readlines()
-            print(f"多进程写入测试: 预期{expected_count}条, 实际{len(lines)}条")
-            assert len(lines) == expected_count, "日志数量不匹配，可能存在进程间冲突"
+            print(f"Multi-process write test: Expected {expected_count}, Actual {len(lines)}")
+            assert len(lines) == expected_count, "Log count mismatch, possible inter-process conflict"
             
     def run_all_tests(self):
-        """运行所有并发测试"""
-        print("=== 开始并发测试 ===")
+        """Run all concurrency tests"""
+        print("=== Starting concurrency tests ===")
         
         self.test_config_race_condition()
         self.test_message_race_condition()
         self.test_multiprocess_logging()
         
         self.cleanup()
-        print("=== 并发测试完成 ===")
+        print("=== Concurrency tests completed ===")
 
 if __name__ == "__main__":
     tester = ConcurrencyTest()
