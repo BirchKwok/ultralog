@@ -76,7 +76,7 @@ python -m ultralog.server \
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| name | str | "Logger" | Logger name prefix |
+| name | str | "UltraLogger" | Logger name prefix |
 | fp | str | None | Local log file path |
 | level | str | "INFO" | Minimum log level |
 | truncate_file | bool | False | Truncate existing log file |
