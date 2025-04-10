@@ -1,4 +1,4 @@
-# UltraLog - Unified Logging System
+# UltraLog - High-performance Logging System
 
 UltraLog is a high-performance logging system that supports both local file logging and remote API logging.
 
