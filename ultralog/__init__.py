@@ -5,7 +5,7 @@ from typing import Optional
 from .local import UltraLog as LocalUltraLog
 from .utils import LogFormatter
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 
 class UltraLog:
@@ -32,21 +32,8 @@ class UltraLog:
         auth_token: Optional[str] = None
     ):
         import inspect
-        # Set logger name to caller module name if None
-        if name is None:
-            frame = inspect.currentframe()
-            try:
-                # Walk up the stack to find the first non-ultralog frame
-                while frame:
-                    module = inspect.getmodule(frame)
-                    if module and not module.__name__.startswith('ultralog'):
-                        name = module.__name__
-                        break
-                    frame = frame.f_back
-            finally:
-                del frame  # Avoid reference cycles
-        
-        self._name = name or "Logger"
+        # Use "UltraLog" as default name if not specified
+        self._name = name if name is not None else "UltraLog"
         """
         Initialize the unified logger.
         
@@ -72,7 +59,7 @@ class UltraLog:
         self._formatter = LogFormatter(
             name=self._name,
             with_time=with_time,
-            fmt="%(asctime)s | %(levelname)s | %(message)s"
+            fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(module)s:<module>:%(line)s - %(message)s"
         )
 
         if self._server_url is not None and self._auth_token is not None:

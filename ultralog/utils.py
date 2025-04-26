@@ -67,7 +67,7 @@ def get_env_variable(
 class LogFormatter:
     _TIME_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
     _TIMESTAMP_CACHE_TIME = 0.5
-    DEFAULT_FORMAT = "%(asctime)s | %(levelname)-8s | %(module)s:%(func)s:%(line)s - %(message)s"
+    DEFAULT_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(module)s:<module>:%(line)s - %(message)s"
 
     def __init__(self, name: str = "Logger", with_time: bool = True, fmt: Optional[str] = None):
         self._name = name
@@ -127,7 +127,8 @@ class LogFormatter:
             'message': msg,
             'module': module,
             'func': func,
-            'line': line
+            'line': line,
+            'name': self._name
         }
         
         try:
