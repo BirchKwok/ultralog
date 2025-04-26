@@ -1,6 +1,5 @@
 from datetime import datetime
 import os
-import logging
 import threading
 import time
 from typing import Any, TypeVar, Callable, Optional, Union, Type
@@ -58,7 +57,7 @@ def get_env_variable(
         # Use provided type or function for conversion
         return default_type(value)
     except Exception as e:
-        logging.warning(
+        print(
             f"Failed to convert environment variable {name}='{value}' to {default_type.__name__} type: {str(e)}. "
             f"Using default value {default}"
         )
@@ -66,12 +65,14 @@ def get_env_variable(
     
 
 class LogFormatter:
-    _TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+    _TIME_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
     _TIMESTAMP_CACHE_TIME = 0.5
+    DEFAULT_FORMAT = "%(asctime)s | %(levelname)-8s | %(module)s:%(func)s:%(line)s - %(message)s"
 
-    def __init__(self, name: str = "Logger", with_time: bool = True):
-        self.name = name
+    def __init__(self, name: str = "Logger", with_time: bool = True, fmt: Optional[str] = None):
+        self._name = name
         self.with_time = with_time
+        self.fmt = fmt or self.DEFAULT_FORMAT
         self._last_timestamp = ""
         self._last_timestamp_time = 0
         self._timestamp_lock = threading.Lock()
@@ -86,12 +87,63 @@ class LogFormatter:
                     self._last_timestamp_time = current_time
         return self._last_timestamp
 
-    def _get_level_prefix(self, level: str) -> str:
-        """Dynamic level prefix generation"""
-        return f"{self.name} - {level} - " if not self.with_time else f" - {self.name} - {level} - "
-
     def format_message(self, msg: str, level: str) -> bytes:
-        """Format log message as bytes"""
-        prefix = self._get_level_prefix(level)
-        timestamp = self._get_timestamp() if self.with_time else ""
-        return f"{timestamp}{prefix}{msg}\n".encode('utf-8')
+        """Format log message as bytes using the format string"""
+        import sys
+        import os
+        
+        # Initialize default values
+        line_no = 1
+        filename = "__main__"
+        caller_info = f"{filename}:<module>:{line_no}"
+        
+        try:
+            # Get the current frame (much faster than getouterframes)
+            frame = sys._getframe(1)  # Skip this frame
+            
+            # Skip frames from ultralog itself
+            while frame:
+                if (not frame.f_globals.get('__name__', '').startswith('ultralog') and 
+                   not frame.f_code.co_filename.endswith('ultralog/__init__.py')):
+                    # Found first non-ultralog frame
+                    line_no = frame.f_lineno
+                    # In Jupyter notebooks, use __main__ instead of numeric filename
+                    if '__file__' not in frame.f_globals:
+                        filename = "__main__"
+                    else:
+                        filename = os.path.basename(frame.f_code.co_filename)
+                    caller_info = f"{filename}:<module>:{line_no}"
+                    break
+                frame = frame.f_back
+                
+        except Exception:
+            pass  # Keep default values if anything goes wrong
+
+        # Cache the split parts to avoid repeated string splitting
+        module, func, line = caller_info.split(':')
+        record = {
+            'asctime': self._get_timestamp() if self.with_time else "",
+            'levelname': level,
+            'message': msg,
+            'module': module,
+            'func': func,
+            'line': line
+        }
+        
+        try:
+            formatted = self.fmt % record
+        except KeyError as e:
+            formatted = f"Invalid log format placeholder: {e}. Using default format."
+            formatted = self.DEFAULT_FORMAT % record
+            
+        return f"{formatted}\n".encode('utf-8')
+
+    @property
+    def name(self) -> str:
+        """Get the logger name (read-only)"""
+        return self._name
+
+    def set_format(self, fmt: str) -> None:
+        """Update the log format string dynamically"""
+        with self._timestamp_lock:  # Use existing lock for thread safety
+            self.fmt = fmt

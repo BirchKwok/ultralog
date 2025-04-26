@@ -31,6 +31,22 @@ class UltraLog:
         server_url: Optional[str] = None,
         auth_token: Optional[str] = None
     ):
+        import inspect
+        # Set logger name to caller module name if None
+        if name is None:
+            frame = inspect.currentframe()
+            try:
+                # Walk up the stack to find the first non-ultralog frame
+                while frame:
+                    module = inspect.getmodule(frame)
+                    if module and not module.__name__.startswith('ultralog'):
+                        name = module.__name__
+                        break
+                    frame = frame.f_back
+            finally:
+                del frame  # Avoid reference cycles
+        
+        self._name = name or "Logger"
         """
         Initialize the unified logger.
         
@@ -54,20 +70,20 @@ class UltraLog:
         self._auth_token = auth_token
 
         self._formatter = LogFormatter(
-            name=name or "UltraLogger",
-            with_time=with_time
+            name=self._name,
+            with_time=with_time,
+            fmt="%(asctime)s | %(levelname)s | %(message)s"
         )
 
         if self._server_url is not None and self._auth_token is not None:
             self._mode = 'remote'
         
         self.console_output = console_output
-        self.name = name or "Logger"
         self._level = level
         
         if self._mode == 'local':
             self._logger = LocalUltraLog(
-                name=name,
+                name=self._name,
                 fp=fp,
                 level=level,
                 truncate_file=truncate_file,
@@ -83,7 +99,6 @@ class UltraLog:
             )
         else:
             self._logger = None  # Remote mode doesn't need local logger instance
-            self.name = name or "Logger"
             self._level = level
             self.console_output = console_output
     
@@ -138,6 +153,12 @@ class UltraLog:
     def warning(self, msg: str) -> None: self.log(msg, 'WARNING')
     def error(self, msg: str) -> None: self.log(msg, 'ERROR')
     def critical(self, msg: str) -> None: self.log(msg, 'CRITICAL')
+
+    def set_format(self, fmt: str) -> None:
+        """Dynamically update the log format string"""
+        self._formatter.set_format(fmt)
+        if self._mode == 'local' and hasattr(self, '_logger'):
+            self._logger.formatter.set_format(fmt)
 
     def close(self):
         """Close the logger and release resources"""

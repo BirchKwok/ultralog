@@ -83,6 +83,88 @@ logger = UltraLog(
 logger.info("Remote log message")
 ```
 
+## Log Formatting
+
+UltraLog provides flexible log formatting similar to Python's built-in logging module.
+
+### Default Format
+The default format follows loguru-style:
+`%(asctime)s | %(levelname)-8s | %(module)s:%(func)s:%(line)s - %(message)s`
+
+Example output:
+`2025-04-19 07:50:22.139 | INFO     | __main__:<module>:1 - Application started`
+
+### Format Placeholders
+| Placeholder | Description |
+|-------------|-------------|
+| %(asctime)s | Timestamp (YYYY-MM-DD HH:MM:SS.microseconds) |
+| %(levelname)s | Log level (DEBUG, INFO, WARNING, etc.) |
+| %(module)s | Module name where log was called |
+| %(func)s | Function name where log was called |
+| %(line)s | Line number where log was called |
+| %(message)s | The log message |
+
+### Custom Formats
+You can customize the format by passing a `fmt` parameter to the LogFormatter:
+
+```python
+from ultralog import UltraLog
+
+# Custom format logger
+logger = UltraLog(
+    name="MyApp",
+    fmt="[%(levelname)s] %(name)s - %(asctime)s - %(message)s"
+)
+```
+
+### Available Placeholders
+
+| Placeholder | Description |
+|-------------|-------------|
+| %(asctime)s | Timestamp (YYYY-MM-DD HH:MM:SS.microseconds) |
+| %(levelname)s | Log level (DEBUG, INFO, WARNING, etc.) |
+| %(name)s | Logger name |
+| %(message)s | The log message |
+
+### Dynamic Format Changes
+
+You can change the log format dynamically after initialization:
+
+```python
+logger = UltraLog(name="MyApp")
+
+# Initial format
+logger.info("First message")  # Uses default format
+
+# Change format
+logger.set_format("%(levelname)s - %(message)s")
+logger.info("Second message")  # Uses new simple format
+
+# Change to detailed format
+logger.set_format("[%(asctime)s] %(levelname)-8s %(name)s: %(message)s")
+logger.info("Third message")  # Uses detailed format
+```
+
+### Format Examples
+
+1. Simple format:
+   ```python
+   fmt="%(levelname)s: %(message)s"
+   ```
+   Output: `INFO: Application started`
+
+2. Detailed format:
+   ```python
+   fmt="[%(asctime)s] [%(levelname)-8s] %(name)-15s: %(message)s"
+   ```
+   Output: `[2025-04-18 21:17:16.205283] [INFO    ] MyApp          : Application started`
+
+3. JSON format:
+   ```python
+   fmt='{"time": "%(asctime)s", "level": "%(levelname)s", "logger": "%(name)s", "msg": "%(message)s"}'
+   ```
+   Output: `{"time": "2025-04-18 21:17:16.205283", "level": "INFO", "logger": "MyApp", "msg": "Application started"}`
+
 ## Server Configuration
 
 Run the server with custom parameters:
