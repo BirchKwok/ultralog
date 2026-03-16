@@ -147,13 +147,13 @@ impl TimestampCache {
         // Fast path: concurrent readers proceed without blocking
         {
             let guard = self.cached.read();
-            if guard.1.map_or(false, |t| t.elapsed() < self.ttl) {
+            if guard.1.is_some_and(|t| t.elapsed() < self.ttl) {
                 return Arc::clone(&guard.0);
             }
         }
         // Slow path: upgrade to write lock, double-check
         let mut guard = self.cached.write();
-        if guard.1.map_or(false, |t| t.elapsed() < self.ttl) {
+        if guard.1.is_some_and(|t| t.elapsed() < self.ttl) {
             return Arc::clone(&guard.0);
         }
         let ts: Arc<str> = Arc::from(format_now());

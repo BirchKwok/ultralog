@@ -109,5 +109,9 @@ async def health_check():
     return {"status": "healthy"}
 
 if __name__ == "__main__":
+    import sys
+    import asyncio
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     import uvicorn
     uvicorn.run(app, host=args.host, port=args.port)
