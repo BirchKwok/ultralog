@@ -3,9 +3,35 @@ import sys
 import threading
 import time
 import queue
-from typing import Optional
+import functools
+import psutil
+from typing import Optional, Callable, Any
 
 from .utils import get_env_variable, LogFormatter
+
+def monitor_memory(func: Callable) -> Callable:
+    """Decorator to monitor memory usage of critical functions"""
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs) -> Any:
+        process = psutil.Process(os.getpid())
+        mem_before = process.memory_info().rss / (1024 * 1024)  # MB
+        
+        result = func(*args, **kwargs)
+        
+        mem_after = process.memory_info().rss / (1024 * 1024)
+        mem_diff = mem_after - mem_before
+        
+        # Only log if memory change is significant (>1MB)
+        if abs(mem_diff) > 1:
+            instance = args[0] if args else None
+            if hasattr(instance, '_safe_console_output'):
+                instance._safe_console_output(
+                    f"Memory usage by {func.__name__}: {mem_diff:.2f}MB "
+                    f"(before: {mem_before:.2f}MB, after: {mem_after:.2f}MB)"
+                )
+        
+        return result
+    return wrapper
 
 
 class UltraLog:
@@ -15,13 +41,15 @@ class UltraLog:
 
     _LOG_LEVELS = {'DEBUG': 10, 'INFO': 20, 'WARNING': 30, 'ERROR': 40, 'CRITICAL': 50}
     _TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
-    _TIMESTAMP_CACHE_TIME = 0.5
-    _DEFAULT_FILE_BUFFER_SIZE = 256 * 1024  # 256KB
-    _BATCH_SIZE = 50  # Default batch size
-    _FLUSH_INTERVAL = 0.05  # Default flush interval
+    _TIMESTAMP_CACHE_TIME = 2.0  # Increased from 0.5s to 2s
+    _DEFAULT_FILE_BUFFER_SIZE = 512 * 1024  # 512KB (restored buffer optimization)
+    _SEGMENTED_LOCK_COUNT = 4  # Reduced from 8 to simplify lock granularity
+    _BATCH_SIZE = 100  # Increased batch size (restored optimization)
+    _FLUSH_INTERVAL = 0.1  # Adjusted flush interval (restored optimization)
     _MAX_MEMORY_USAGE = 100  # MB - soft memory limit
     _CRITICAL_MEMORY_USAGE = 150  # MB - hard memory limit
-    _LARGE_MESSAGE_THRESHOLD = 1024  # Bytes - consider message large if bigger
+    _LARGE_MESSAGE_THRESHOLD = 8 * 1024  # 8KB - consider message large if bigger
+    _MAX_MESSAGE_SIZE = 10 * 1024  # 10KB - maximum allowed message size
 
     def __init__(
         self,
@@ -82,6 +110,7 @@ class UltraLog:
         self._current_size = 0
         self._closed = False
         self._write_queue = queue.Queue()
+        # Batch buffer for message collection
         self._batch_buffer = []
         self._batch_lock = threading.Lock()
         self._last_flush_time = time.time()
@@ -91,8 +120,11 @@ class UltraLog:
         self._last_timestamp_time = 0
         self._timestamp_lock = threading.Lock()
 
-        # File operations lock
+        # File lock for state protection
         self._file_lock = threading.Lock()
+        
+        # Segmented file locks for better concurrency
+        self._file_locks = [threading.Lock() for _ in range(self._SEGMENTED_LOCK_COUNT)]
 
         # Initialize file handling
         if fp:
@@ -159,121 +191,127 @@ class UltraLog:
         """Ensure proper cleanup when logger is garbage collected"""
         self.close()
 
+    def _get_file_lock(self):
+        """Get the appropriate segmented lock based on current file position"""
+        segment = self._current_size % self._SEGMENTED_LOCK_COUNT
+        return self._file_locks[segment]
+
     def _rotate_log(self):
         """Thread-safe log rotation with timeout protection"""
         if not self.fp or not self.enable_rotation:
             self._safe_console_output("Rotation disabled")
             return
 
-        # Perform entire rotation under single lock to maintain consistency
-        with self._file_lock:
-            try:
-                # Check file size
-                actual_size = os.path.getsize(self.fp)
-                self._safe_console_output(f"Rotation check - Current size: {actual_size}, Max size: {self.max_file_size}")
-                
-                if actual_size <= self.max_file_size:
-                    self._safe_console_output("Rotation not needed - file size below threshold")
-                    return
+        # Acquire ALL segmented locks before any conditional return so that
+        # every exit path (early return or exception) releases every lock.
+        for lock in self._file_locks:
+            lock.acquire()
+        try:
+            # Check file size
+            actual_size = os.path.getsize(self.fp) if os.path.exists(self.fp) else 0
+            self._safe_console_output(f"Rotation check - Current size: {actual_size}, Max size: {self.max_file_size}")
 
-                # Close current file handle if open
-                if self._file_handle:
-                    try:
-                        self._safe_console_output("Closing current file handle for rotation")
-                        self._file_handle.close()
-                    except Exception as e:
-                        self._safe_console_output(f"Error closing file handle: {e}")
-                    finally:
-                        self._file_handle = None
+            if actual_size <= self.max_file_size:
+                self._safe_console_output("Rotation not needed - file size below threshold")
+                return  # finally block releases all locks
 
-                # Perform rotation with timeout
-                start_time = time.time()
-                timeout = 2.0  # 2 second timeout
-                rotation_success = False
-                self._safe_console_output(f"Starting rotation process for {self.fp}")
-                
+            # Close current file handle if open
+            if self._file_handle:
                 try:
-                    # Rotate backups from oldest to newest
-                    self._safe_console_output(f"Starting rotation with backup_count={self.backup_count}")
-                    
-                    # First remove the oldest backup if it exists
-                    oldest_backup = f"{self.fp}.{self.backup_count}"
-                    if os.path.exists(oldest_backup):
-                        try:
-                            self._safe_console_output(f"Removing oldest backup: {oldest_backup}")
-                            os.remove(oldest_backup)
-                        except Exception as e:
-                            self._safe_console_output(f"Error removing oldest backup: {e}")
-                    
-                    # Then rotate the remaining backups
-                    for i in range(self.backup_count - 1, 0, -1):
-                        if time.time() - start_time > timeout:
-                            raise TimeoutError("Rotation timeout")
-                            
-                        src = f"{self.fp}.{i}" if i > 0 else self.fp
-                        dst = f"{self.fp}.{i+1}"
-                        self._safe_console_output(f"Processing rotation: {src} -> {dst}")
+                    self._safe_console_output("Closing current file handle for rotation")
+                    self._file_handle.close()
+                except Exception as e:
+                    self._safe_console_output(f"Error closing file handle: {e}")
+                finally:
+                    self._file_handle = None
 
-                        if os.path.exists(src):
-                            try:
-                                self._safe_console_output(f"Rotating {src} to {dst}")
-                                os.rename(src, dst)
-                            except Exception as e:
-                                self._safe_console_output(f"Error rotating {src} to {dst}: {e}")
-                                continue
+            # Perform rotation with timeout
+            start_time = time.time()
+            timeout = 2.0  # 2 second timeout
+            rotation_success = False
+            self._safe_console_output(f"Starting rotation process for {self.fp}")
 
-                    rotation_success = True
-                    # Verify all backup files were created
-                    backup_files = []
-                    for i in range(1, self.backup_count + 1):
-                        backup_path = f"{self.fp}.{i}"
-                        if os.path.exists(backup_path):
-                            backup_files.append(backup_path)
-                        else:
-                            # Create empty backup file if missing
-                            try:
-                                with open(backup_path, 'w') as f:
-                                    pass
-                                backup_files.append(backup_path)
-                            except Exception as e:
-                                self._safe_console_output(f"Error creating backup file {backup_path}: {e}")
-                    
-                    # Ensure we have the expected number of backups
-                    if len(backup_files) < self.backup_count:
-                        self._safe_console_output(f"Warning: Only created {len(backup_files)} backups, expected {self.backup_count}")
-                    else:
-                        self._safe_console_output(f"Log rotation completed - created {len(backup_files)} backups: {backup_files}")
+            try:
+                # Rotate backups from oldest to newest
+                self._safe_console_output(f"Starting rotation with backup_count={self.backup_count}")
 
-                except TimeoutError:
-                    self._safe_console_output("Rotation timed out - attempting recovery")
-                    # Try to reopen original file if rotation failed
-                    if os.path.exists(self.fp):
-                        try:
-                            self._safe_console_output("Attempting to reopen original file after timeout")
-                            self._open_file()
-                            self._safe_console_output("Successfully recovered original log file")
-                        except Exception as e:
-                            self._safe_console_output(f"Failed to recover log file: {e}")
-                    return
-
-                # Reopen new log file if rotation succeeded
-                if rotation_success:
+                # First remove the oldest backup if it exists
+                oldest_backup = f"{self.fp}.{self.backup_count}"
+                if os.path.exists(oldest_backup):
                     try:
-                        self._safe_console_output("Opening new log file after successful rotation")
-                        self._open_file()
-                        self._current_size = 0
-                        self._safe_console_output(f"New log file opened successfully at {self.fp}")
+                        self._safe_console_output(f"Removing oldest backup: {oldest_backup}")
+                        os.remove(oldest_backup)
                     except Exception as e:
-                        self._safe_console_output(f"Error opening new log file: {e}")
+                        self._safe_console_output(f"Error removing oldest backup: {e}")
 
-            except Exception as e:
-                self._safe_console_output(f"Unexpected error during rotation: {e}")
-                # Attempt to reopen file if possible
+                # Then rotate the remaining backups
+                for i in range(self.backup_count - 1, 0, -1):
+                    if time.time() - start_time > timeout:
+                        raise TimeoutError("Rotation timeout")
+
+                    src = f"{self.fp}.{i}" if i > 0 else self.fp
+                    dst = f"{self.fp}.{i+1}"
+                    self._safe_console_output(f"Processing rotation: {src} -> {dst}")
+
+                    if os.path.exists(src):
+                        try:
+                            self._safe_console_output(f"Rotating {src} to {dst}")
+                            os.rename(src, dst)
+                        except Exception as e:
+                            self._safe_console_output(f"Error rotating {src} to {dst}: {e}")
+                            continue
+
+                rotation_success = True
+                backup_files = []
+                for i in range(1, self.backup_count + 1):
+                    backup_path = f"{self.fp}.{i}"
+                    if os.path.exists(backup_path):
+                        backup_files.append(backup_path)
+                    else:
+                        try:
+                            with open(backup_path, 'w') as f:
+                                pass
+                            backup_files.append(backup_path)
+                        except Exception as e:
+                            self._safe_console_output(f"Error creating backup file {backup_path}: {e}")
+
+                if len(backup_files) < self.backup_count:
+                    self._safe_console_output(f"Warning: Only created {len(backup_files)} backups, expected {self.backup_count}")
+                else:
+                    self._safe_console_output(f"Log rotation completed - created {len(backup_files)} backups: {backup_files}")
+
+            except TimeoutError:
+                self._safe_console_output("Rotation timed out - attempting recovery")
                 if os.path.exists(self.fp):
                     try:
+                        self._safe_console_output("Attempting to reopen original file after timeout")
                         self._open_file()
-                    except Exception:
-                        self._safe_console_output("Failed to reopen log file after error")
+                        self._safe_console_output("Successfully recovered original log file")
+                    except Exception as e:
+                        self._safe_console_output(f"Failed to recover log file: {e}")
+                return  # finally block releases all locks
+
+            # Reopen new log file if rotation succeeded
+            if rotation_success:
+                try:
+                    self._safe_console_output("Opening new log file after successful rotation")
+                    self._open_file()
+                    self._current_size = 0
+                    self._safe_console_output(f"New log file opened successfully at {self.fp}")
+                except Exception as e:
+                    self._safe_console_output(f"Error opening new log file: {e}")
+
+        except Exception as e:
+            self._safe_console_output(f"Unexpected error during rotation: {e}")
+            # Attempt to reopen file if possible
+            if os.path.exists(self.fp):
+                try:
+                    self._open_file()
+                except Exception:
+                    self._safe_console_output("Failed to reopen log file after error")
+        finally:
+            for lock in self._file_locks:
+                lock.release()
 
     def _batch_writer(self):
         """Background thread that writes batches of messages"""
@@ -281,11 +319,21 @@ class UltraLog:
             try:
                 # Get all available messages from queue
                 batch = []
+                batch_size = 0
                 while True:
                     try:
                         msg_bytes = self._write_queue.get_nowait()
+                        
+                        # Dynamic batch sizing - smaller batches for large messages
+                        if len(msg_bytes) > self._LARGE_MESSAGE_THRESHOLD:
+                            max_batch_size = max(1, self._BATCH_SIZE // 2)
+                        else:
+                            max_batch_size = self._BATCH_SIZE
+                            
                         batch.append(msg_bytes)
-                        if len(batch) >= self._BATCH_SIZE:
+                        batch_size += len(msg_bytes)
+                        
+                        if len(batch) >= max_batch_size or batch_size > self._LARGE_MESSAGE_THRESHOLD * 2:
                             break
                     except queue.Empty:
                         break
@@ -321,8 +369,9 @@ class UltraLog:
                 with self._file_lock:
                     self._current_size = 0
 
-            # Write batch with minimal lock time
-            with self._file_lock:
+            # Write batch with minimal lock time using segmented lock
+            lock = self._get_file_lock()
+            with lock:
                 with open(self.fp, 'ab', buffering=self._FILE_BUFFER_SIZE) as f:
                     for msg_bytes in batch:
                         bytes_written = f.write(msg_bytes)
@@ -336,6 +385,7 @@ class UltraLog:
         except Exception as e:
             self._safe_console_output(f"Error writing batch to log: {e}")
 
+    @monitor_memory
     def log(self, msg: str, level: str = 'INFO') -> None:
         """Asynchronous logging with level checking"""
         if self._closed:
@@ -345,7 +395,21 @@ class UltraLog:
         if level_value < self.level:
             return
 
+        # Format message (already returns bytes)
         msg_bytes = self.formatter.format_message(msg, level)
+        
+        # Truncate message if exceeds max size with proper UTF-8 boundary
+        if len(msg_bytes) > self._MAX_MESSAGE_SIZE:
+            truncated = msg_bytes[:self._MAX_MESSAGE_SIZE]
+            # Ensure we don't cut in middle of UTF-8 sequence
+            while truncated and (truncated[-1] & 0b11000000) == 0b10000000:
+                truncated = truncated[:-1]
+            msg_bytes = truncated
+            self._safe_console_output(
+                f"Message truncated from {len(msg_bytes)} to {len(truncated)} bytes "
+                f"(max: {self._MAX_MESSAGE_SIZE})"
+            )
+
         msg_str = msg_bytes.decode('utf-8').rstrip()
 
         # Console output
@@ -354,8 +418,24 @@ class UltraLog:
 
         # Queue message for file output
         if self.fp:
-            self._safe_console_output(f"Queuing message - Size: {len(msg_bytes)} bytes")
-            self._write_queue.put(msg_bytes)
+            msg_size = len(msg_bytes)
+            self._safe_console_output(f"Queuing message - Size: {msg_size} bytes")
+            
+            # Adjust batch size dynamically based on message size
+            if msg_size > self._LARGE_MESSAGE_THRESHOLD:
+                batch_size = max(1, self._BATCH_SIZE // 2)  # Smaller batch for large messages
+                self._safe_console_output(f"Using reduced batch size {batch_size} for large message")
+            else:
+                batch_size = self._BATCH_SIZE
+                
+            # Split large messages into chunks
+            if msg_size > self._LARGE_MESSAGE_THRESHOLD:
+                chunk_size = self._LARGE_MESSAGE_THRESHOLD // 2
+                for i in range(0, msg_size, chunk_size):
+                    chunk = msg_bytes[i:i+chunk_size]
+                    self._write_queue.put(chunk)
+            else:
+                self._write_queue.put(msg_bytes)
 
 
     # Convenience methods
@@ -400,8 +480,11 @@ class UltraLog:
             if self._writer_thread.is_alive():
                 self._safe_console_output("Writer thread did not exit in time")
         
-        # Close file handles with lock protection
-        with self._file_lock:
+        # Close file handles with all locks protection
+        for lock in self._file_locks:
+            lock.acquire()
+            
+        try:
             if self._file_handle:
                 try:
                     self._safe_console_output("Closing file handle")
@@ -413,4 +496,9 @@ class UltraLog:
                     self._file_handle = None
                     self._file = None
         
+        finally:
+            for lock in self._file_locks:
+                lock.release()
+                
         self._safe_console_output("Logger shutdown complete")
+

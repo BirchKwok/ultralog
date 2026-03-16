@@ -1,0 +1,161 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Build Python wheels for all platforms / Python versions ─────────────────
+  build-wheels:
+    name: Wheels – ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      # Build manylinux wheels on Linux, native wheels on macOS / Windows
+      - name: Build wheels (manylinux / native)
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: >
+            --release
+            --features pyo3/extension-module
+            --out dist
+          manylinux: auto
+          # Build for all supported CPython versions
+          target: ${{ matrix.os == 'macos-latest' && 'universal2-apple-darwin' || '' }}
+
+      # macOS: also produce x86_64 wheel for older Macs
+      - name: Build wheels (macOS x86_64)
+        if: matrix.os == 'macos-latest'
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: >
+            --release
+            --features pyo3/extension-module
+            --out dist
+            --target x86_64-apple-darwin
+
+      - name: Upload wheel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: dist/*.whl
+
+  # ── Build pure-Python sdist ──────────────────────────────────────────────────
+  build-sdist:
+    name: Source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          command: sdist
+          args: --out dist
+
+      - name: Upload sdist artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdist
+          path: dist/*.tar.gz
+
+  # ── Publish to PyPI ──────────────────────────────────────────────────────────
+  publish-pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [build-wheels, build-sdist]
+    environment:
+      name: pypi
+      url: https://pypi.org/p/ultralog
+    permissions:
+      id-token: write  # OIDC trusted publishing
+
+    steps:
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist/
+
+      - name: Download sdist artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist/
+
+      - name: Publish to PyPI (trusted OIDC)
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  # ── Publish to crates.io ─────────────────────────────────────────────────────
+  publish-crate:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        # Build without PyO3 extension-module feature for the rlib crate
+        run: cargo publish --no-verify
+
+  # ── Create GitHub Release ────────────────────────────────────────────────────
+  github-release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-wheels, build-sdist]
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: "wheels-*"
+          merge-multiple: true
+          path: dist/
+
+      - name: Download sdist
+        uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

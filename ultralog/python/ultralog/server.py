@@ -37,7 +37,8 @@ def parse_args():
                        help='Host address to bind to')
     parser.add_argument('--port', type=int, default=8000,
                        help='Port number to listen on')
-    return parser.parse_args()
+    args, _ = parser.parse_known_args()
+    return args
 
 args = parse_args()
 
