@@ -91,6 +91,7 @@ impl LogLevel {
         self as u32
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Self {
         match s.to_ascii_uppercase().as_str() {
             "DEBUG" => LogLevel::Debug,
@@ -128,7 +129,7 @@ impl LogLevel {
 // ─── Timestamp Cache ──────────────────────────────────────────────────────────
 
 struct TimestampCache {
-    cached: RwLock<(Arc<str>, Instant)>,
+    cached: RwLock<(Arc<str>, Option<Instant>)>,
     ttl: Duration,
 }
 
@@ -136,7 +137,7 @@ impl TimestampCache {
     fn new(ttl_ms: u64) -> Self {
         let empty: Arc<str> = Arc::from("");
         Self {
-            cached: RwLock::new((empty, Instant::now() - Duration::from_secs(9999))),
+            cached: RwLock::new((empty, None)),
             ttl: Duration::from_millis(ttl_ms),
         }
     }
@@ -146,18 +147,18 @@ impl TimestampCache {
         // Fast path: concurrent readers proceed without blocking
         {
             let guard = self.cached.read();
-            if guard.1.elapsed() < self.ttl {
+            if guard.1.map_or(false, |t| t.elapsed() < self.ttl) {
                 return Arc::clone(&guard.0);
             }
         }
         // Slow path: upgrade to write lock, double-check
         let mut guard = self.cached.write();
-        if guard.1.elapsed() < self.ttl {
+        if guard.1.map_or(false, |t| t.elapsed() < self.ttl) {
             return Arc::clone(&guard.0);
         }
         let ts: Arc<str> = Arc::from(format_now());
         guard.0 = Arc::clone(&ts);
-        guard.1 = Instant::now();
+        guard.1 = Some(Instant::now());
         ts
     }
 }

@@ -2,6 +2,8 @@ import os
 import argparse
 from contextlib import asynccontextmanager
 
+from typing import Optional
+
 from fastapi import FastAPI, HTTPException, Request, status, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
@@ -66,18 +68,17 @@ async def lifespan(app: FastAPI):
     app.state.logger.close()
 
 app = FastAPI(lifespan=lifespan)
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
 
-async def verify_token(credentials: HTTPAuthorizationCredentials):
-    if credentials.credentials != args.auth_token:
+async def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
+    if credentials is None or credentials.credentials != args.auth_token:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication credentials"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid or missing authentication credentials"
         )
 
 @app.post("/log")
-async def log_message(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
-    await verify_token(credentials)
+async def log_message(request: Request, _: None = Depends(verify_token)):
     try:
         data = await request.json()
         level = data.get("level", "INFO").upper()
@@ -108,12 +109,5 @@ async def health_check():
     return {"status": "healthy"}
 
 if __name__ == "__main__":
-    import sys
-    if sys.platform == "win32":
-        from waitress import serve
-        from asgiref.wsgi import WsgiToAsgi
-        wsgi_app = WsgiToAsgi(app)
-        serve(wsgi_app, host=args.host, port=args.port)
-    else:
-        import uvicorn
-        uvicorn.run(app, host=args.host, port=args.port)
+    import uvicorn
+    uvicorn.run(app, host=args.host, port=args.port)

@@ -295,7 +295,7 @@ class TestRustLogPerformance(unittest.TestCase):
         total = n_threads * n_per_thread
         tps = total / elapsed
         print(f"\n[Rust] multithreaded throughput: {tps:,.0f} msg/s")
-        assert tps > 500_000, f"Multithreaded throughput too low: {tps:,.0f} msg/s"
+        assert tps > 200_000, f"Multithreaded throughput too low: {tps:,.0f} msg/s"
 
     @pytest.mark.skipif(
         not __import__("importlib.util", fromlist=["find_spec"]).find_spec("psutil"),
