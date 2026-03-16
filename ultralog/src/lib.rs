@@ -167,8 +167,12 @@ fn format_now() -> String {
     use chrono::{Datelike, Timelike};
     format!(
         "{:04}-{:02}-{:02} {:02}:{:02}:{:02}.{:06}",
-        dt.year(), dt.month(), dt.day(),
-        dt.hour(), dt.minute(), dt.second(),
+        dt.year(),
+        dt.month(),
+        dt.day(),
+        dt.hour(),
+        dt.minute(),
+        dt.second(),
         dt.nanosecond() / 1000
     )
 }
@@ -626,11 +630,26 @@ impl Logger {
         let _ = self.sender.try_send(WriteMsg::Data(bytes));
     }
 
-    #[inline] pub fn debug(&self, msg: &str) { self.log(msg, LogLevel::Debug); }
-    #[inline] pub fn info(&self, msg: &str) { self.log(msg, LogLevel::Info); }
-    #[inline] pub fn warning(&self, msg: &str) { self.log(msg, LogLevel::Warning); }
-    #[inline] pub fn error(&self, msg: &str) { self.log(msg, LogLevel::Error); }
-    #[inline] pub fn critical(&self, msg: &str) { self.log(msg, LogLevel::Critical); }
+    #[inline]
+    pub fn debug(&self, msg: &str) {
+        self.log(msg, LogLevel::Debug);
+    }
+    #[inline]
+    pub fn info(&self, msg: &str) {
+        self.log(msg, LogLevel::Info);
+    }
+    #[inline]
+    pub fn warning(&self, msg: &str) {
+        self.log(msg, LogLevel::Warning);
+    }
+    #[inline]
+    pub fn error(&self, msg: &str) {
+        self.log(msg, LogLevel::Error);
+    }
+    #[inline]
+    pub fn critical(&self, msg: &str) {
+        self.log(msg, LogLevel::Critical);
+    }
 
     /// Flush pending writes.
     pub fn flush(&self) {
@@ -751,7 +770,9 @@ impl PyUltraLog {
             builder = builder.fp(path);
         }
 
-        Self { inner: builder.build() }
+        Self {
+            inner: builder.build(),
+        }
     }
 
     /// Log a message at the specified level.
@@ -760,17 +781,31 @@ impl PyUltraLog {
         self.inner.log(msg, LogLevel::from_str(level));
     }
 
-    fn debug(&self, msg: &str) { self.inner.debug(msg); }
-    fn info(&self, msg: &str) { self.inner.info(msg); }
-    fn warning(&self, msg: &str) { self.inner.warning(msg); }
-    fn error(&self, msg: &str) { self.inner.error(msg); }
-    fn critical(&self, msg: &str) { self.inner.critical(msg); }
+    fn debug(&self, msg: &str) {
+        self.inner.debug(msg);
+    }
+    fn info(&self, msg: &str) {
+        self.inner.info(msg);
+    }
+    fn warning(&self, msg: &str) {
+        self.inner.warning(msg);
+    }
+    fn error(&self, msg: &str) {
+        self.inner.error(msg);
+    }
+    fn critical(&self, msg: &str) {
+        self.inner.critical(msg);
+    }
 
     /// Flush buffered writes to disk.
-    fn flush(&self) { self.inner.flush(); }
+    fn flush(&self) {
+        self.inner.flush();
+    }
 
     /// Shut down the logger and flush all pending writes.
-    fn close(&self) { self.inner.close(); }
+    fn close(&self) {
+        self.inner.close();
+    }
 
     /// Get the current log level string.
     #[getter]
@@ -1000,7 +1035,10 @@ mod tests {
         logger.close();
         let elapsed = start.elapsed().as_secs_f64();
         let tps = n as f64 / elapsed;
-        println!("Rust throughput: {:.0} msg/s ({:.2}s for {})", tps, elapsed, n);
+        println!(
+            "Rust throughput: {:.0} msg/s ({:.2}s for {})",
+            tps, elapsed, n
+        );
         // Must be at least 800k msg/s on any modern machine
         assert!(tps > 800_000.0, "throughput too low: {:.0} msg/s", tps);
     }
