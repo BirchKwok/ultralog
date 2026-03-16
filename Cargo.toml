@@ -1,17 +1,20 @@
 [package]
 name = "ultralog"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
+authors = ["BirchKwok <birchkwok@gmail.com>"]
 description = "High-performance thread-safe logger with async batched writes and log rotation"
 license = "Apache-2.0"
 repository = "https://github.com/BirchKwok/ultralog"
-keywords = ["logging", "logger", "async", "performance"]
+homepage = "https://github.com/BirchKwok/ultralog"
+documentation = "https://docs.rs/ultralog"
+keywords = ["logging", "logger", "async", "performance", "rotation"]
 categories = ["development-tools::debugging"]
 readme = "README.md"
 exclude = ["tests/", ".github/", "*.ipynb", "*.py"]
 
 [lib]
-name = "_ultralog"
+name = "ultralog"
 path = "ultralog/src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 

@@ -11,7 +11,7 @@ from typing import Optional
 
 from ultralog._ultralog import UltraLog as _RustLog  # type: ignore[import]
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 
 # ── Remote helper ─────────────────────────────────────────────────────────────

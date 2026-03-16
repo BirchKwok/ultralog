@@ -1,3 +1,40 @@
+//! # ultralog
+//!
+//! High-performance, thread-safe logger with a dedicated writer thread,
+//! batched async I/O, microsecond timestamps and automatic log rotation.
+//!
+//! ## Quick start
+//!
+//! ```no_run
+//! use ultralog::{LoggerBuilder, LogLevel};
+//!
+//! let log = LoggerBuilder::new()
+//!     .name("my-app")
+//!     .fp("/var/log/my-app/app.log")
+//!     .level(LogLevel::Info)
+//!     .console_output(false)
+//!     .build();
+//!
+//! log.info("server started");
+//! log.warning("disk usage high");
+//! log.error("connection refused");
+//! log.close(); // flushes and joins the writer thread
+//! ```
+//!
+//! ## Architecture
+//!
+//! Each [`Logger`] owns a bounded MPSC channel (64 K slots). Callers enqueue
+//! pre-formatted `Vec<u8>` messages with a non-blocking `try_send`; a
+//! dedicated background thread drains the channel in batches through a
+//! 1 MB [`std::io::BufWriter`]. This decouples caller latency from disk I/O
+//! entirely.
+//!
+//! ## Feature flags
+//!
+//! | Feature | Effect |
+//! |---------|--------|
+//! | `extension-module` | Compiles the PyO3 Python extension (`ultralog._ultralog`) |
+
 use std::fs::{self, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -14,7 +51,21 @@ use pyo3::prelude::*;
 
 // ─── Log Level ───────────────────────────────────────────────────────────────
 
-/// Log severity levels.
+/// Log severity level.
+///
+/// Levels are ordered: `Debug < Info < Warning < Error < Critical`.
+/// Any message whose level is below the logger's configured minimum is
+/// silently dropped before entering the channel.
+///
+/// # Examples
+///
+/// ```
+/// use ultralog::LogLevel;
+///
+/// assert!(LogLevel::Debug < LogLevel::Info);
+/// assert_eq!(LogLevel::from_str("WARN"), LogLevel::Warning);
+/// assert_eq!(LogLevel::Info.as_str(), "INFO");
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LogLevel {
     Debug = 10,
@@ -289,7 +340,25 @@ fn flush_pending(
 
 // ─── Public Rust API ─────────────────────────────────────────────────────────
 
-/// Builder for [`Logger`].
+/// Fluent builder for [`Logger`].
+///
+/// # Examples
+///
+/// ```no_run
+/// use ultralog::{LoggerBuilder, LogLevel};
+///
+/// let log = LoggerBuilder::new()
+///     .name("svc")
+///     .fp("/tmp/svc.log")
+///     .level(LogLevel::Warning)
+///     .max_file_size(50 * 1024 * 1024)
+///     .backup_count(10)
+///     .console_output(false)
+///     .build();
+///
+/// log.error("something failed");
+/// log.close();
+/// ```
 pub struct LoggerBuilder {
     name: String,
     fp: Option<PathBuf>,
@@ -408,18 +477,38 @@ impl LoggerBuilder {
 
 /// High-performance async logger.
 ///
-/// # Example
-/// ```
+/// Created via [`LoggerBuilder`]. Drop-safe: [`Drop`] calls [`Logger::close`]
+/// automatically, so explicit `close()` is optional but recommended when you
+/// need a guaranteed flush at a precise point.
+///
+/// # Thread safety
+///
+/// `Logger` is `Send + Sync`. Multiple threads can call any logging method
+/// concurrently — all internal state uses atomics and lock-free channels.
+///
+/// # Examples
+///
+/// ```no_run
 /// use ultralog::{LoggerBuilder, LogLevel};
+/// use std::sync::Arc;
+/// use std::thread;
 ///
-/// let logger = LoggerBuilder::new()
-///     .name("my-app")
-///     .level(LogLevel::Info)
-///     .console_output(false)
-///     .build();
+/// let log = Arc::new(
+///     LoggerBuilder::new()
+///         .name("worker")
+///         .fp("/tmp/worker.log")
+///         .level(LogLevel::Info)
+///         .console_output(false)
+///         .build(),
+/// );
 ///
-/// logger.info("Hello from Rust!");
-/// logger.close();
+/// let handles: Vec<_> = (0..4).map(|id| {
+///     let log = Arc::clone(&log);
+///     thread::spawn(move || log.info(&format!("thread {id} started")))
+/// }).collect();
+///
+/// for h in handles { h.join().unwrap(); }
+/// log.close();
 /// ```
 pub struct Logger {
     name: Arc<String>,
@@ -700,7 +789,6 @@ impl PyUltraLog {
 #[pymodule]
 fn _ultralog(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyUltraLog>()?;
-    m.add("__version__", "0.4.0")?;
     Ok(())
 }
 
