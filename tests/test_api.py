@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 import tempfile
 import shutil
 import threading
@@ -79,9 +80,9 @@ class TestRemoteAPI(unittest.TestCase):
     def setUpClass(cls):
         import subprocess
         cls.server_process = subprocess.Popen(
-            ["python", "-m", "ultralog.server", "--host", "127.0.0.1", "--port", "9999"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            [sys.executable, "-m", "ultralog.server", "--host", "127.0.0.1", "--port", "9999"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
         )
 
         time.sleep(2)
